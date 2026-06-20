@@ -14,22 +14,24 @@ import { dataTableRequest, unwrapRows } from './stores/client';
 import { makeStore } from './stores/makeStore';
 
 /**
- * Read-through cache as a single node, wired like the Loop Over Items node:
- * one input, two outputs, and a cycle.
+ * Read-through / write-back cache with two inputs:
  *
- *   input ─▶ [Cache] ─ hit  ─▶ Continue
- *                  └ miss ─▶ Process ─▶ your work ─┐
- *                    ▲────────── loop back ────────┘
+ *   ┌──────────── Data Table Cache ────────────┐
+ *   Input  ─▶│ lookup → Cache Hit / Cache Miss            │
+ *   Update ─▶│ store the item, then emit on Cache Hit     │
+ *            └────────────────────────────────────────────┘
  *
- *   - First pass (lookup): a fresh hit is emitted on **Continue**; a miss (or expired
- *     row) is emitted on **Process** and the key is remembered for this execution.
- *   - Loop-back pass (store): when the processed item returns on the same input, the node
- *     stores it and emits it on **Continue**.
+ *   - **Input** (index 0): items to look up. A hit emits the parsed payload on **Cache Hit**;
+ *     a miss (or expired row) emits the item on **Cache Miss**.
+ *   - **Update** (index 1): processed items to write back. They are upserted and emitted on
+ *     **Cache Hit** so the flow continues with the now-cached payload.
  *
- * Pass detection uses per-execution node state (`getContext('node')`), the same mechanism
- * Loop Over Items uses, keyed by the cache key. The key is recomputed from the returned
- * item, so the field(s) the Cache Key expression derives from must survive your processing
- * — otherwise the loop-back item won't be recognised as a store pass.
+ * Wire it like a loop: Cache Miss → your work → the Update input.
+ *
+ * `requiredInputs: 1` lets the node run as soon as *either* input has data (it would
+ * otherwise wait for all inputs, deadlocking the lookup→process→update cycle). Under
+ * `executionOrder: 'v1'` the engine resolves expressions against whichever input carries the
+ * items, so the Cache Key expression works for both the Input and Update passes.
  */
 export class DataTableCache implements INodeType {
 	description: INodeTypeDescription = {
@@ -38,11 +40,15 @@ export class DataTableCache implements INodeType {
 		icon: 'file:datatablecache.svg',
 		group: ['transform'],
 		version: 1,
-		description: 'Read-through cache backed by an n8n data table; loops misses out for processing',
+		description: 'Read-through / write-back cache backed by an n8n data table',
 		defaults: { name: 'Data Table Cache' },
-		inputs: ['main'],
+		inputs: [
+			{ type: 'main', displayName: 'Input' },
+			{ type: 'main', displayName: 'Update', required: false },
+		],
+		requiredInputs: 1,
 		outputs: ['main', 'main'],
-		outputNames: ['Continue', 'Process'],
+		outputNames: ['Cache Hit', 'Cache Miss'],
 		credentials: [{ name: 'dataTableCacheApi', required: true }],
 		properties: [
 			{
@@ -93,8 +99,7 @@ export class DataTableCache implements INodeType {
 				type: 'string',
 				default: '',
 				required: true,
-				description:
-					'Value to look up / store under. Derive it from a field that survives your processing nodes (such as a record key or order number) so the loop-back item is recognised on its way back.',
+				description: 'Value to look up (on the Input) or store under (on the Update)',
 			},
 			{
 				displayName: 'Payload Column',
@@ -123,7 +128,7 @@ export class DataTableCache implements INodeType {
 				type: 'number',
 				default: 3600,
 				typeOptions: { minValue: 0 },
-				description: 'A hit older than this is treated as a miss and looped out for reprocessing',
+				description: 'A hit older than this is treated as a miss',
 			},
 			{
 				displayName: 'Unit',
@@ -171,41 +176,25 @@ export class DataTableCache implements INodeType {
 	};
 
 	async execute(this: IExecuteFunctions): Promise<INodeExecutionData[][]> {
-		const items = this.getInputData();
-		const cont: INodeExecutionData[] = [];
-		const process: INodeExecutionData[] = [];
+		const lookupItems = this.getInputData(0);
+		const updateItems = this.getInputData(1);
+		const hit: INodeExecutionData[] = [];
+		const miss: INodeExecutionData[] = [];
 		const store = makeStore(this);
 
-		// Per-execution scratch space: keys we emitted for processing and now expect back.
-		const context = this.getContext('node');
-		const pending = (context.pendingKeys as Record<string, boolean>) ?? {};
-		context.pendingKeys = pending;
+		const params = (i: number) => ({
+			tableId: this.getNodeParameter('dataTableId', i, '', { extractValue: true }) as string,
+			keyCol: this.getNodeParameter('keyCol', i) as string,
+			key: this.getNodeParameter('cacheKey', i) as string,
+			payloadCol: this.getNodeParameter('payloadCol', i) as string,
+			modifiedCol: this.getNodeParameter('modifiedCol', i) as string,
+			accessCol: this.getNodeParameter('accessCol', i) as string,
+		});
 
-		for (let i = 0; i < items.length; i++) {
-			const tableId = this.getNodeParameter('dataTableId', i, '', {
-				extractValue: true,
-			}) as string;
-			const keyCol = this.getNodeParameter('keyCol', i) as string;
-			const key = this.getNodeParameter('cacheKey', i) as string;
-			const payloadCol = this.getNodeParameter('payloadCol', i) as string;
-			const modifiedCol = this.getNodeParameter('modifiedCol', i) as string;
-			const accessCol = this.getNodeParameter('accessCol', i) as string;
-
+		// --- Input (index 0): lookups ---
+		for (let i = 0; i < lookupItems.length; i++) {
 			try {
-				// Store pass: this item is a previously-missed key coming back after processing.
-				if (pending[key]) {
-					delete pending[key];
-					const now = new Date().toISOString();
-					await store.upsert(tableId, keyCol, key, {
-						[payloadCol]: JSON.stringify(items[i].json),
-						[modifiedCol]: now,
-						[accessCol]: now,
-					});
-					cont.push({ json: items[i].json, pairedItem: { item: i } });
-					continue;
-				}
-
-				// Lookup pass.
+				const { tableId, keyCol, key, payloadCol, modifiedCol, accessCol } = params(i);
 				const row = await store.get(tableId, keyCol, key);
 
 				const ttl = this.getNodeParameter('ttl', i) as number;
@@ -213,24 +202,20 @@ export class DataTableCache implements INodeType {
 				const ttlFrom = this.getNodeParameter('ttlFrom', i) as string;
 				const fromCol = ttlFrom === 'access' ? accessCol : modifiedCol;
 
-				const missed = !row || isExpiredByTtl(row, { fromCol, maxAgeMs: ttl * ttlUnit });
-				if (missed) {
-					pending[key] = true;
-					const json: IDataObject = { ...items[i].json };
+				if (!row || isExpiredByTtl(row, { fromCol, maxAgeMs: ttl * ttlUnit })) {
+					const json: IDataObject = { ...lookupItems[i].json };
 					if (row) json._staleRow = row as IDataObject;
-					process.push({ json, pairedItem: { item: i } });
+					miss.push({ json, pairedItem: { item: i, input: 0 } });
 					continue;
 				}
 
-				// Fresh hit: bump last_access and emit the cached payload.
 				await store.touch(tableId, keyCol, key, { [accessCol]: new Date().toISOString() });
-				cont.push({ json: safeParse(row![payloadCol]), pairedItem: { item: i } });
+				hit.push({ json: safeParse(row[payloadCol]), pairedItem: { item: i, input: 0 } });
 			} catch (error) {
 				if (this.continueOnFail()) {
-					// Emit on Continue (not Process) so a failure never re-enters the loop.
-					cont.push({
-						json: { ...items[i].json, error: (error as Error).message },
-						pairedItem: { item: i },
+					miss.push({
+						json: { ...lookupItems[i].json, error: (error as Error).message },
+						pairedItem: { item: i, input: 0 },
 					});
 					continue;
 				}
@@ -238,6 +223,29 @@ export class DataTableCache implements INodeType {
 			}
 		}
 
-		return [cont, process];
+		// --- Update (index 1): write-back, then continue on Cache Hit ---
+		for (let j = 0; j < updateItems.length; j++) {
+			try {
+				const { tableId, keyCol, key, payloadCol, modifiedCol, accessCol } = params(j);
+				const now = new Date().toISOString();
+				await store.upsert(tableId, keyCol, key, {
+					[payloadCol]: JSON.stringify(updateItems[j].json),
+					[modifiedCol]: now,
+					[accessCol]: now,
+				});
+				hit.push({ json: updateItems[j].json, pairedItem: { item: j, input: 1 } });
+			} catch (error) {
+				if (this.continueOnFail()) {
+					hit.push({
+						json: { ...updateItems[j].json, error: (error as Error).message },
+						pairedItem: { item: j, input: 1 },
+					});
+					continue;
+				}
+				throw new NodeOperationError(this.getNode(), error as Error, { itemIndex: j });
+			}
+		}
+
+		return [hit, miss];
 	}
 }

@@ -12,35 +12,34 @@ and TTL expiry.
 
 ## What it does
 
-A single read-through cache node, wired like the **Loop Over Items** node — one input, two
-outputs, and a cycle:
+A read-through / write-back cache node with **two inputs** (`Input`, `Update`) and **two
+outputs** (`Cache Hit`, `Cache Miss`), wired as a loop:
 
 ```
-        ┌────────── Data Table Cache ──────────┐
-input ─▶ │  hit  → Continue (cached payload)    │──▶ continue
-         │  miss → Process                      │──▶ expensive work ─┐
-         │  (loop-back: store, then → Continue) │◀──────────────────-┘
-         └──────────────────────────────────────┘
+            ┌──────────── Data Table Cache ────────────┐
+ Input  ─▶ │ lookup → Cache Hit (payload) / Cache Miss │──▶ Cache Hit  → use payload
+ Update ─▶ │ store the item → Cache Hit                │──▶ Cache Miss → work ─┐
+            └───────────────────────────────────────────┘                     │
+                  ▲────────────────── Update ───────────────────────────────--┘
 ```
 
-- **First pass (lookup).** Read the row by cache key. A fresh hit is emitted on **Continue**
-  with the parsed payload (and `last_access` is bumped). A miss — or a hit older than **Max
-  Age** — is emitted on **Process**, and the key is remembered for this execution. Expired
-  hits also attach the stale row as `_staleRow` for debugging.
-- **Loop-back pass (store).** Wire the **Process** output through your work and back into the
-  node's input. When the processed item returns, the node upserts it (payload +
-  `last_modified` + `last_access`) and emits it on **Continue**.
+- **Input** (index 0) — items to look up. A fresh hit emits the parsed payload on **Cache
+  Hit** (and bumps `last_access`). A miss, or a hit older than **Max Age**, emits the item on
+  **Cache Miss** (expired hits also attach the stale row as `_staleRow` for debugging).
+- **Update** (index 1) — processed items to write back. Each is upserted (payload +
+  `last_modified` + `last_access`) and emitted on **Cache Hit** so the flow continues with the
+  now-cached payload.
 
-Outputs: index `0` = **Continue**, index `1` = **Process**.
+Wire it like a loop: **Cache Miss → your work → the Update input**; take **Cache Hit** onward.
 
-### Important: the cache key must survive your processing
+### How the two inputs work (the mechanism)
 
-Pass detection (lookup vs. store) uses per-execution node state keyed by the **cache key**,
-and the key is **recomputed from the returned item** on the loop-back. So derive the Cache Key
-from a field your processing nodes preserve (a record key, order number, etc.). If the key
-can't be recomputed to the same value on the way back, the item won't be recognised as a store
-pass — it'll be treated as a fresh lookup and loop again. (This is the documented tradeoff of
-the single-node loop design.)
+A naive two-input node would wait for *all* inputs before running, deadlocking the
+lookup→process→update cycle. This node sets **`requiredInputs: 1`** so it runs as soon as
+*either* input has data. Under n8n's modern `executionOrder: 'v1'`, the engine also resolves
+expressions against whichever input carries the items, so the **Cache Key** expression
+evaluates correctly on both the Input pass and the Update pass. (Requires `executionOrder: v1`,
+the default for workflows created on recent n8n.)
 
 ## Install
 
@@ -100,7 +99,7 @@ credential to **API Key** — no workflow changes needed.
 | -------------------- | --------------- | ------------------------------------------------ |
 | Data Table           | —               | Pick from list or enter the table ID             |
 | Key Column           | `cache_key`     | Column matched against the cache key             |
-| Cache Key            | —               | Expression-friendly; derive from a field that survives processing |
+| Cache Key            | —               | Expression-friendly; value to look up (Input) or store under (Update) |
 | Payload Column       | `payload`       | Holds the stringified payload                    |
 | Last Modified Column | `last_modified` | ISO datetime of last write                       |
 | Last Access Column   | `last_access`   | ISO datetime of last hit                         |
@@ -110,25 +109,25 @@ credential to **API Key** — no workflow changes needed.
 ## Example flow
 
 ```
-Trigger ─▶ Data Table Cache ─ Continue ─▶ use payload (cached or freshly stored) ─▶ …
-                            └ Process  ─▶ expensive work ─┐
-                              ▲────────── loop back ──────┘
+Trigger ─▶ [Input] Data Table Cache [Cache Hit] ─▶ use payload (cached or freshly stored) ─▶ …
+                                    [Cache Miss] ─▶ expensive work ─▶ [Update] (same node)
 ```
 
-Wire **Process** through your work and back into the node's input; wire **Continue** onward.
-On a hit it fires immediately; on a miss it fires after the loop-back stores the result.
+Wire **Cache Miss** through your work and into the node's **Update** input; take **Cache Hit**
+onward. A hit fires immediately; a miss fires Cache Hit again once the Update pass stores it.
 
 ## Notes & limitations
 
-- **Cache key must survive processing** — see [above](#important-the-cache-key-must-survive-your-processing).
-  If a returned item's key can't be recomputed, it loops again instead of being stored.
+- **Requires `executionOrder: v1`** (default on recent n8n) for the two-input loop to schedule
+  and for Cache Key expressions to resolve on the Update pass.
 - **Concurrency:** last-write-wins. Acceptable for a cache; do not use as a transactional store.
 - **Malformed payload:** a non-JSON / legacy payload degrades gracefully — a hit returns
   `{ _raw: <value> }` rather than throwing.
 - **Expiry:** TTL only for now. Filter-condition ("reuse the IF builder") expiry is planned;
   it depends on a mutation-then-evaluate workaround that must be validated per n8n version.
-- **Continue On Fail:** when enabled, a row that errors is emitted on **Continue** (never
-  back into the loop) with an `error` field, instead of failing the execution.
+- **Continue On Fail:** when enabled, an item that errors is emitted with an `error` field
+  instead of failing the execution — a failed lookup on **Cache Miss**, a failed store on
+  **Cache Hit**.
 
 ## Data access — the fragile part
 
