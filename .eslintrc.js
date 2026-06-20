@@ -26,15 +26,6 @@ module.exports = {
 			},
 		},
 		{
-			files: ['./credentials/**/*.ts'],
-			plugins: ['eslint-plugin-n8n-nodes-base'],
-			extends: ['plugin:n8n-nodes-base/credentials'],
-			rules: {
-				// Conflicts with cred-class-field-documentation-url-not-http-url; we keep a real URL.
-				'n8n-nodes-base/cred-class-field-documentation-url-miscased': 'off',
-			},
-		},
-		{
 			files: ['./nodes/**/*.ts'],
 			plugins: ['eslint-plugin-n8n-nodes-base'],
 			extends: ['plugin:n8n-nodes-base/nodes'],

@@ -4,12 +4,12 @@ import type { CacheRow, CacheStore } from './CacheStore';
 import { dataTableRequest, keyFilter, unwrapRows, type RequestContext } from './client';
 
 /**
- * CacheStore backed by the n8n data-table REST API (BRIEF §0, Option 3).
+ * CacheStore backed by the n8n public Data Table API.
  *
  * Maps the three cache primitives onto the data-table row operations:
- *   - get    -> GET    /{tableId}/rows?filter=...   (eq on the key column, take 1)
- *   - upsert -> POST   /{tableId}/upsert            (filter + data)
- *   - touch  -> PATCH  /{tableId}/rows              (filter + partial data)
+ *   - get    -> GET   /{tableId}/rows?filter=...   (eq on the key column, limit 1)
+ *   - upsert -> POST  /{tableId}/rows/upsert       (filter + data)
+ *   - touch  -> PATCH /{tableId}/rows/update       (filter + partial data)
  */
 export class HttpCacheStore implements CacheStore {
 	constructor(private readonly ctx: RequestContext) {}
@@ -20,7 +20,7 @@ export class HttpCacheStore implements CacheStore {
 			path: `/${tableId}/rows`,
 			qs: {
 				filter: JSON.stringify(keyFilter(keyCol, key)),
-				take: 1,
+				limit: 1,
 			},
 		});
 
@@ -31,7 +31,7 @@ export class HttpCacheStore implements CacheStore {
 	async upsert(tableId: string, keyCol: string, key: string, fields: CacheRow): Promise<void> {
 		await dataTableRequest(this.ctx, {
 			method: 'POST',
-			path: `/${tableId}/upsert`,
+			path: `/${tableId}/rows/upsert`,
 			body: {
 				filter: keyFilter(keyCol, key),
 				data: { [keyCol]: key, ...fields } as IDataObject,
@@ -43,7 +43,7 @@ export class HttpCacheStore implements CacheStore {
 	async touch(tableId: string, keyCol: string, key: string, fields: CacheRow): Promise<void> {
 		await dataTableRequest(this.ctx, {
 			method: 'PATCH',
-			path: `/${tableId}/rows`,
+			path: `/${tableId}/rows/update`,
 			body: {
 				filter: keyFilter(keyCol, key),
 				data: fields as IDataObject,

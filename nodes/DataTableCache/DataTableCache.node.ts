@@ -49,7 +49,7 @@ export class DataTableCache implements INodeType {
 		requiredInputs: 1,
 		outputs: ['main', 'main'],
 		outputNames: ['Cache Hit', 'Cache Miss'],
-		credentials: [{ name: 'dataTableCacheApi', required: true }],
+		credentials: [{ name: 'n8nApi', required: true }],
 		properties: [
 			{
 				displayName: 'Data Table',
@@ -162,7 +162,7 @@ export class DataTableCache implements INodeType {
 				this: ILoadOptionsFunctions,
 				filter?: string,
 			): Promise<INodeListSearchResult> {
-				const response = await dataTableRequest(this, { method: 'GET', path: '/' });
+				const response = await dataTableRequest(this, { method: 'GET', path: '' });
 				const needle = (filter ?? '').toLowerCase();
 				const results = unwrapRows(response)
 					.map((table) => ({

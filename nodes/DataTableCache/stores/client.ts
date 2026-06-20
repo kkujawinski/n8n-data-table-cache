@@ -9,7 +9,11 @@ import { NodeOperationError } from 'n8n-workflow';
 
 import type { CacheRow } from './CacheStore';
 
-export const CREDENTIALS_NAME = 'dataTableCacheApi';
+/**
+ * The built-in n8n public-API credential. Its `authenticate` block injects the
+ * `X-N8N-API-KEY` header, so this node reuses it instead of defining its own.
+ */
+export const CREDENTIALS_NAME = 'n8nApi';
 
 /** Either context that can make authenticated HTTP calls and read credentials. */
 export type RequestContext = IExecuteFunctions | ILoadOptionsFunctions;
@@ -28,19 +32,20 @@ export function keyFilter(keyCol: string, key: string): DataTableFilter {
 
 interface DataTableRequestOptions {
 	method: IHttpRequestMethods;
-	/** Path under `/rest/projects/{projectId}/data-tables` — leading slash optional. */
+	/** Path under `/data-tables` — leading slash optional; `''` targets the collection. */
 	path: string;
 	qs?: IDataObject;
 	body?: IDataObject;
 }
 
 /**
- * Low-level call against the n8n data-table REST API.
+ * Low-level call against the n8n **public** Data Table API
+ * (`<baseUrl>/data-tables/...`, where `baseUrl` already ends in `/api/v1`),
+ * authenticated by the built-in `n8nApi` credential (API key → `X-N8N-API-KEY`).
  *
- * THIS IS THE SINGLE FRAGILE LINE TO REVISIT ON EVERY n8n UPGRADE (BRIEF §0).
- * It targets the internal `/rest/projects/{projectId}/data-tables/...` controller,
- * which is cookie-authenticated today. When the public `/api/v1` data-table API ships,
- * swap the base path and the auth header here; nothing else in the node changes.
+ * This replaced the original internal `/rest/projects/{projectId}/...` + session-cookie
+ * route once n8n shipped the public DataTable API. The filter syntax is unchanged; the
+ * route, auth, and response envelope are the parts that moved — revisit here on upgrades.
  */
 export async function dataTableRequest(
 	ctx: RequestContext,
@@ -49,53 +54,32 @@ export async function dataTableRequest(
 	const credentials = await ctx.getCredentials(CREDENTIALS_NAME);
 
 	const baseUrl = String(credentials.baseUrl ?? '').replace(/\/+$/, '');
-	const projectId = String(credentials.projectId ?? '');
-	if (!baseUrl || !projectId) {
+	if (!baseUrl) {
 		throw new NodeOperationError(
 			ctx.getNode(),
-			'Data Table Cache API credential is missing the Base URL or Project ID.',
+			'The n8n API credential is missing its Base URL (e.g. http://localhost:5678/api/v1).',
 		);
 	}
 
-	const headers: IDataObject = { Accept: 'application/json' };
-	if (credentials.authMethod === 'apiKey') {
-		headers['X-N8N-API-KEY'] = credentials.apiKey;
-	} else {
-		headers.Cookie = `n8n-auth=${credentials.sessionCookie ?? ''}`;
-		if (credentials.browserId) headers['browser-id'] = credentials.browserId;
-	}
-
-	const normalizedPath = path.startsWith('/') ? path : `/${path}`;
+	const suffix = path && !path.startsWith('/') ? `/${path}` : path;
 	const options: IHttpRequestOptions = {
 		method,
-		url: `${baseUrl}/rest/projects/${projectId}/data-tables${normalizedPath}`,
-		headers,
+		url: `${baseUrl}/data-tables${suffix}`,
+		headers: { Accept: 'application/json' },
 		json: true,
 		...(qs ? { qs } : {}),
 		...(body ? { body } : {}),
 	};
 
-	return await ctx.helpers.httpRequest(options);
+	return await ctx.helpers.httpRequestWithAuthentication.call(ctx, CREDENTIALS_NAME, options);
 }
 
 /**
- * n8n's `/rest` endpoints wrap their payload in `{ data: ... }`, and the rows endpoint
- * itself returns `{ count, data: [...] }`. Peel both layers and return the row array.
+ * The public API wraps list and row responses in a single `{ data: [...] }` envelope
+ * (alongside an optional `nextCursor`). Peel that one layer and return the row array.
  */
 export function unwrapRows(response: unknown): CacheRow[] {
-	let payload = response as IDataObject | undefined;
-
-	// Outer REST envelope: { data: { count, data: [...] } }
-	if (
-		payload &&
-		typeof payload === 'object' &&
-		!Array.isArray(payload.data) &&
-		payload.data &&
-		typeof payload.data === 'object'
-	) {
-		payload = payload.data as IDataObject;
-	}
-
-	const rows = payload?.data ?? payload;
+	const payload = response as IDataObject | undefined;
+	const rows = payload && typeof payload === 'object' ? payload.data : undefined;
 	return Array.isArray(rows) ? (rows as CacheRow[]) : [];
 }

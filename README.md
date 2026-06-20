@@ -72,26 +72,22 @@ configurable on the node — these are the defaults):
 
 The auto columns `id`, `createdAt`, `updatedAt` are added by n8n and are not used by the node.
 
-## Credentials — `Data Table Cache API`
+## Credentials — `n8n API`
 
-| Field            | Notes                                                                 |
-| ---------------- | --------------------------------------------------------------------- |
-| **Base URL**     | Root URL of your n8n instance, e.g. `http://localhost:5678`            |
-| **Project ID**   | The project that owns the table. From the project URL `/projects/<id>` |
-| **Authentication** | `Session Cookie` (works today) or `API Key` (forward-compatible)    |
-| **Session Cookie** | The `n8n-auth` cookie value from a logged-in browser session         |
-| **Browser ID**   | The `browser-id` header value sent by the n8n UI                       |
-| **API Key**      | An n8n API key (only once the public data-table API ships)             |
+The node talks to the **public** n8n Data Table API, so it uses the built-in **`n8n API`**
+credential (the same one the core *n8n* node uses) — no custom credential to configure.
 
-### Why a session cookie?
+| Field        | Notes                                                                   |
+| ------------ | ----------------------------------------------------------------------- |
+| **API Key**  | Create one in n8n under **Settings → n8n API**                          |
+| **Base URL** | The API URL of your instance, including `/api/v1`, e.g. `http://localhost:5678/api/v1` |
 
-As of n8n 2.x, data-table row CRUD is only reachable via the internal
-`/rest/projects/{projectId}/data-tables/...` route, which is authenticated by the browser
-session cookie — **not** by an n8n API key (the public `/api/v1` data-table endpoints are
-still an open feature request). To grab the values: open n8n in your browser while logged in,
-open DevTools → **Application → Cookies** for the `n8n-auth` value, and **Network** → any
-`/rest/...` request → Request Headers for `browser-id`. When the public API ships, switch the
-credential to **API Key** — no workflow changes needed.
+Authentication is by API key (sent as the `X-N8N-API-KEY` header); there is no project ID,
+session cookie, or browser ID to supply. Make sure the API key's scopes include the data-table
+row operations (`dataTableRow:read`, `dataTableRow:upsert`, `dataTableRow:update`).
+
+> Requires an n8n version whose public API exposes `/api/v1/data-tables/...`. On older instances
+> these endpoints return 404 — upgrade n8n if lookups fail with a not-found error.
 
 ## Node parameters
 
@@ -133,9 +129,9 @@ onward. A hit fires immediately; a miss fires Cache Hit again once the Update pa
 
 All data-table I/O is isolated behind a small `CacheStore` interface
 (`nodes/DataTableCache/stores/`). Today the only implementation is `HttpCacheStore`, which
-calls the internal REST API. The single line to revisit on every n8n upgrade is the route /
-auth construction in `stores/client.ts` (`dataTableRequest`). Swapping to a future in-process
-DI service or the public `/api/v1` API means adding one `CacheStore` implementation and
+calls the public `/api/v1/data-tables/...` API. The single line to revisit on every n8n upgrade
+is the route / response-envelope construction in `stores/client.ts` (`dataTableRequest`).
+Swapping to a future in-process DI service means adding one `CacheStore` implementation and
 selecting it in `stores/makeStore.ts` — `execute` does not change.
 
 ## Development
