@@ -41,6 +41,10 @@ expressions against whichever input carries the items, so the **Cache Key** expr
 evaluates correctly on both the Input pass and the Update pass. (Requires `executionOrder: v1`,
 the default for workflows created on recent n8n.)
 
+> **New here?** The [**Usage guide**](docs/USAGE.md) walks through the recommended data-table
+> schema, the credential, and an importable example workflow
+> ([`examples/`](examples/datatable-cache.example.workflow.json)).
+
 ## Install
 
 Community node (n8n **Settings → Community Nodes → Install**):

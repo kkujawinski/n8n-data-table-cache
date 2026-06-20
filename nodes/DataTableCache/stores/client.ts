@@ -62,16 +62,35 @@ export async function dataTableRequest(
 	}
 
 	const suffix = path && !path.startsWith('/') ? `/${path}` : path;
+	const url = `${baseUrl}/data-tables${suffix}`;
 	const options: IHttpRequestOptions = {
 		method,
-		url: `${baseUrl}/data-tables${suffix}`,
+		url,
 		headers: { Accept: 'application/json' },
 		json: true,
 		...(qs ? { qs } : {}),
 		...(body ? { body } : {}),
 	};
 
-	return await ctx.helpers.httpRequestWithAuthentication.call(ctx, CREDENTIALS_NAME, options);
+	// Debug logging — visible in the n8n server log with N8N_LOG_LEVEL=debug.
+	ctx.logger.debug(
+		`[DataTableCache] ${method} ${url}${qs ? ` qs=${JSON.stringify(qs)}` : ''}`,
+	);
+
+	try {
+		return await ctx.helpers.httpRequestWithAuthentication.call(ctx, CREDENTIALS_NAME, options);
+	} catch (error) {
+		const err = error as { httpCode?: string; statusCode?: number; message?: string };
+		const status = err.httpCode ?? err.statusCode ?? 'no status';
+		ctx.logger.error(`[DataTableCache] ${method} ${url} failed (${status}): ${err.message ?? ''}`);
+		throw new NodeOperationError(ctx.getNode(), error as Error, {
+			message: `Data Table API request failed (${status}): ${method} ${url}`,
+			description:
+				status === 404 || status === '404'
+					? 'The /api/v1/data-tables endpoint was not found. Confirm your n8n version exposes the public Data Table API and that the credential Base URL ends in /api/v1.'
+					: 'Check the n8n API credential (Base URL ending in /api/v1, valid API key with data-table scopes).',
+		});
+	}
 }
 
 /**
