@@ -7,15 +7,20 @@ credential, importing the example workflow, and keeping the cache healthy.
 
 ## 1. Create the data table (recommended setup)
 
-The node stores each cached item as one row. The recommended schema is **four `string`
-columns** (n8n adds `id`, `createdAt`, `updatedAt` automatically):
+The node stores each cached item as one row. The full schema is four columns (n8n adds `id`,
+`createdAt`, `updatedAt` automatically); only the first three are required:
 
-| Column          | Type               | Holds                                     | Why                                                             |
-| --------------- | ------------------ | ----------------------------------------- | --------------------------------------------------------------- |
-| `cache_key`     | `string`           | The lookup key (e.g. a record id, a hash) | Matched on every lookup/upsert                                  |
-| `payload`       | `string`           | `JSON.stringify` of the cached item       | The node writes/reads text — **must be `string`**, not `json`   |
-| `last_modified` | `string` or `date` | ISO-8601 timestamp of the last write      | TTL source                                                      |
-| `last_access`   | `string` or `date` | ISO-8601 timestamp of the last cache hit  | Lets you expire by idle time or build an LRU cleanup            |
+| Column          | Type               | Required?                         | Holds                                     | Why                                                           |
+| --------------- | ------------------ | --------------------------------- | ----------------------------------------- | ------------------------------------------------------------- |
+| `cache_key`     | `string`           | Yes                               | The lookup key (e.g. a record id, a hash) | Matched on every lookup/upsert                                |
+| `payload`       | `string`           | Yes                               | `JSON.stringify` of the cached item       | The node writes/reads text — **must be `string`**, not `json` |
+| `last_modified` | `string` or `date` | Yes                               | ISO-8601 timestamp of the last write      | Default TTL source                                            |
+| `last_access`   | `string` or `date` | **Optional**                      | ISO-8601 timestamp of the last cache hit  | Only for **Measure From = Last Access** (idle TTL) or LRU cleanup |
+
+> **`last_access` is optional.** Leave the node's **Last Access Column** empty to skip it — the
+> node then writes one fewer column per hit and you can omit the column from the table. You only
+> need it if you set **Measure From = Last Access**, or want to prune by idle time. A minimal
+> table is just `cache_key` + `payload` + `last_modified`.
 
 > **`payload` must be `string`.** The node serialises it with `JSON.stringify` and reads it
 > back with `JSON.parse`; a `json` column would return a parsed object and break that
@@ -45,7 +50,8 @@ the header row; after import, make sure **`payload` is `String`** (re-set it if 
 row if you don't want it.
 
 **Option B — by hand.** **Data tables → Create** → add `cache_key` and `payload` as **String**,
-and `last_modified` / `last_access` as **String** or **Date**.
+and `last_modified` as **String** or **Date**. Add `last_access` (String/Date) too if you want
+idle-time TTL or LRU cleanup; otherwise leave it out and clear the node's Last Access Column.
 
 Either way, copy the table id from the URL when you're done.
 
@@ -108,9 +114,10 @@ Derive **Cache Key** from a field present on both the lookup item and the proces
 
 - **Max Age + Unit** — how long a hit stays fresh. Older hits route to **Cache Miss**.
 - **Measure From**:
-  - `Last Modified` — time since the value was cached (most caches want this).
+  - `Last Modified` — time since the value was cached (most caches want this). The default;
+    needs no `last_access` column.
   - `Last Access` — time since it was last read; combine with a cleanup job for LRU-style
-    eviction.
+    eviction. **Requires the Last Access Column** to be set (the node errors if it isn't).
 - Expired lookups attach the stale row under `_staleRow` on the miss item, for debugging or
   serve-stale-on-error patterns.
 

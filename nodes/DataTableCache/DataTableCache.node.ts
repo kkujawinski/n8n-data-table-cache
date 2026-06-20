@@ -5,6 +5,7 @@ import {
 	type ILoadOptionsFunctions,
 	type INodeExecutionData,
 	type INodeListSearchResult,
+	type INodePropertyOptions,
 	type INodeType,
 	type INodeTypeDescription,
 } from 'n8n-workflow';
@@ -86,12 +87,16 @@ export class DataTableCache implements INodeType {
 				],
 			},
 			{
-				displayName: 'Key Column',
+				displayName: 'Key Column Name or ID',
 				name: 'keyCol',
-				type: 'string',
+				type: 'options',
+				typeOptions: {
+					loadOptionsMethod: 'getColumns',
+					loadOptionsDependsOn: ['dataTableId.value'],
+				},
 				default: 'cache_key',
 				required: true,
-				description: 'Column that stores the cache key (must exist on the table)',
+				description: 'Column that stores the cache key. Pick from the table\'s columns, or switch to an expression for a custom value. Choose from the list, or specify an ID using an <a href="https://docs.n8n.io/code/expressions/">expression</a>.',
 			},
 			{
 				displayName: 'Cache Key',
@@ -102,25 +107,38 @@ export class DataTableCache implements INodeType {
 				description: 'Value to look up (on the Input) or store under (on the Update)',
 			},
 			{
-				displayName: 'Payload Column',
+				displayName: 'Payload Column Name or ID',
 				name: 'payloadCol',
-				type: 'string',
+				type: 'options',
+				typeOptions: {
+					loadOptionsMethod: 'getColumns',
+					loadOptionsDependsOn: ['dataTableId.value'],
+				},
 				default: 'payload',
-				description: 'Column holding the JSON-stringified payload',
+				description: 'Column holding the JSON-stringified payload. Choose from the list, or specify an ID using an <a href="https://docs.n8n.io/code/expressions/">expression</a>.',
 			},
 			{
-				displayName: 'Last Modified Column',
+				displayName: 'Last Modified Column Name or ID',
 				name: 'modifiedCol',
-				type: 'string',
+				type: 'options',
+				typeOptions: {
+					loadOptionsMethod: 'getColumns',
+					loadOptionsDependsOn: ['dataTableId.value'],
+				},
 				default: 'last_modified',
-				description: 'Column holding the ISO timestamp of the last write',
+				description: 'Column holding the ISO timestamp of the last write. Choose from the list, or specify an ID using an <a href="https://docs.n8n.io/code/expressions/">expression</a>.',
 			},
 			{
-				displayName: 'Last Access Column',
+				displayName: 'Last Access Column Name or ID',
 				name: 'accessCol',
-				type: 'string',
+				type: 'options',
+				typeOptions: {
+					loadOptionsMethod: 'getColumns',
+					loadOptionsDependsOn: ['dataTableId.value'],
+				},
 				default: 'last_access',
-				description: 'Column holding the ISO timestamp of the last cache hit',
+				description:
+					'Optional. Column for the last-hit timestamp; leave empty to skip last-access tracking (one fewer write per hit). Required only when Measure From is Last Access. Choose from the list, or specify an ID using an <a href="https://docs.n8n.io/code/expressions/">expression</a>.',
 			},
 			{
 				displayName: 'Max Age',
@@ -173,6 +191,28 @@ export class DataTableCache implements INodeType {
 				return { results };
 			},
 		},
+		loadOptions: {
+			async getColumns(this: ILoadOptionsFunctions): Promise<INodePropertyOptions[]> {
+				const tableId = this.getCurrentNodeParameter('dataTableId', {
+					extractValue: true,
+				}) as string;
+				if (!tableId) return [];
+
+				// The columns endpoint returns a bare array, not the `{ data: [...] }` envelope.
+				const response = await dataTableRequest(this, {
+					method: 'GET',
+					path: `/${tableId}/columns`,
+				});
+				const columns = Array.isArray(response)
+					? (response as IDataObject[])
+					: ((response as IDataObject)?.data as IDataObject[]) ?? [];
+
+				return columns
+					.map((column) => String(column.name ?? ''))
+					.filter((name) => name)
+					.map((name) => ({ name, value: name }));
+			},
+		},
 	};
 
 	async execute(this: IExecuteFunctions): Promise<INodeExecutionData[][]> {
@@ -200,6 +240,13 @@ export class DataTableCache implements INodeType {
 				const ttl = this.getNodeParameter('ttl', i) as number;
 				const ttlUnit = this.getNodeParameter('ttlUnit', i) as number;
 				const ttlFrom = this.getNodeParameter('ttlFrom', i) as string;
+				if (ttlFrom === 'access' && !accessCol) {
+					throw new NodeOperationError(
+						this.getNode(),
+						'Measure From is "Last Access" but no Last Access Column is set. Configure the Last Access Column, or measure from Last Modified.',
+						{ itemIndex: i },
+					);
+				}
 				const fromCol = ttlFrom === 'access' ? accessCol : modifiedCol;
 
 				if (!row || isExpiredByTtl(row, { fromCol, maxAgeMs: ttl * ttlUnit })) {
@@ -209,7 +256,10 @@ export class DataTableCache implements INodeType {
 					continue;
 				}
 
-				await store.touch(tableId, keyCol, key, { [accessCol]: new Date().toISOString() });
+				// last_access is optional: only bump it when an access column is configured.
+				if (accessCol) {
+					await store.touch(tableId, keyCol, key, { [accessCol]: new Date().toISOString() });
+				}
 				hit.push({ json: safeParse(row[payloadCol]), pairedItem: { item: i, input: 0 } });
 			} catch (error) {
 				if (this.continueOnFail()) {
@@ -228,11 +278,13 @@ export class DataTableCache implements INodeType {
 			try {
 				const { tableId, keyCol, key, payloadCol, modifiedCol, accessCol } = params(j);
 				const now = new Date().toISOString();
-				await store.upsert(tableId, keyCol, key, {
+				const fields: IDataObject = {
 					[payloadCol]: JSON.stringify(updateItems[j].json),
 					[modifiedCol]: now,
-					[accessCol]: now,
-				});
+				};
+				// last_access is optional: only write it when an access column is configured.
+				if (accessCol) fields[accessCol] = now;
+				await store.upsert(tableId, keyCol, key, fields);
 				hit.push({ json: updateItems[j].json, pairedItem: { item: j, input: 1 } });
 			} catch (error) {
 				if (this.continueOnFail()) {
