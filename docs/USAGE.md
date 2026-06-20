@@ -10,16 +10,23 @@ credential, importing the example workflow, and keeping the cache healthy.
 The node stores each cached item as one row. The recommended schema is **four `string`
 columns** (n8n adds `id`, `createdAt`, `updatedAt` automatically):
 
-| Column          | Type     | Holds                                              | Why                                                                 |
-| --------------- | -------- | -------------------------------------------------- | ------------------------------------------------------------------- |
-| `cache_key`     | `string` | The lookup key (e.g. a record id, a hash)          | Matched on every lookup/upsert                                      |
-| `payload`       | `string` | `JSON.stringify` of the cached item                | The node writes/reads text — **keep this `string`**, not `json`     |
-| `last_modified` | `string` | ISO-8601 timestamp of the last write               | TTL source; ISO text sorts chronologically (handy for cleanup)      |
-| `last_access`   | `string` | ISO-8601 timestamp of the last cache hit           | Lets you expire by idle time or build an LRU cleanup                |
+| Column          | Type               | Holds                                     | Why                                                             |
+| --------------- | ------------------ | ----------------------------------------- | --------------------------------------------------------------- |
+| `cache_key`     | `string`           | The lookup key (e.g. a record id, a hash) | Matched on every lookup/upsert                                  |
+| `payload`       | `string`           | `JSON.stringify` of the cached item       | The node writes/reads text — **must be `string`**, not `json`   |
+| `last_modified` | `string` or `date` | ISO-8601 timestamp of the last write      | TTL source                                                      |
+| `last_access`   | `string` or `date` | ISO-8601 timestamp of the last cache hit  | Lets you expire by idle time or build an LRU cleanup            |
 
-> **Why all `string`?** The node serialises the payload with `JSON.stringify` and writes
-> timestamps as `new Date().toISOString()`, then reads them straight back. A `json` or `date`
-> column would change what the API returns and break the round-trip. Stick to `string`.
+> **`payload` must be `string`.** The node serialises it with `JSON.stringify` and reads it
+> back with `JSON.parse`; a `json` column would return a parsed object and break that
+> round-trip (you'd see hits come back as `{ "_raw": ... }`).
+>
+> **The timestamp columns can be `string` or `date`.** The node writes
+> `new Date().toISOString()` and parses read-back values tolerantly — including the no-`Z`
+> form a `date` column yields on SQLite — always as **UTC**, so the TTL is correct either way.
+> `string` is the simplest default; `date` displays nicely in the UI and gives true
+> chronological filtering for [cleanup](#6-maintenance--evict-expired-rows). With `string`
+> columns, ISO-8601 text also sorts chronologically, so cleanup's `lt` filter works too.
 
 ### Create it in the UI
 
@@ -33,10 +40,12 @@ example-key,"{""value"":""hello"",""count"":42}",2026-06-20T12:00:00.000Z,2026-0
 ```
 
 **Data tables → Create → Import from CSV** → pick the file. The four columns are created from
-the header row; after import, confirm each column type is **String** (re-set any that n8n
-inferred as something else), then delete the seed `example-key` row if you don't want it.
+the header row; after import, make sure **`payload` is `String`** (re-set it if n8n inferred
+`json`); the timestamp columns may stay `String` or `Date`. Then delete the seed `example-key`
+row if you don't want it.
 
-**Option B — by hand.** **Data tables → Create** → add the four columns above as **String**.
+**Option B — by hand.** **Data tables → Create** → add `cache_key` and `payload` as **String**,
+and `last_modified` / `last_access` as **String** or **Date**.
 
 Either way, copy the table id from the URL when you're done.
 
