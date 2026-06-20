@@ -34,7 +34,7 @@ async function fetchColumnOptions(ctx: ILoadOptionsFunctions): Promise<INodeProp
 /**
  * Read-through / write-back cache with two inputs:
  *
- *   ┌──────────── Data Table Cache ────────────┐
+ *            ┌──────────── Data Table Cache ────────────┐
  *   Input  ─▶│ lookup → Cache Hit / Cache Miss            │
  *   Update ─▶│ store the item, then emit on Cache Hit     │
  *            └────────────────────────────────────────────┘
@@ -58,6 +58,8 @@ export class DataTableCache implements INodeType {
 		icon: 'file:datatablecache.svg',
 		group: ['transform'],
 		version: 1,
+		subtitle:
+			'={{ $parameter["dataTableId"].cachedResultName || $parameter["dataTableId"].value || "data table" }}',
 		description: 'Read-through / write-back cache backed by an n8n data table',
 		defaults: { name: 'Data Table Cache' },
 		inputs: [

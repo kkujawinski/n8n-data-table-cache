@@ -17,43 +17,32 @@ The node stores each cached item as one row. The full schema is four columns (n8
 | `last_modified` | `string` or `date` | Yes                               | ISO-8601 timestamp of the last write      | Default TTL source                                            |
 | `last_access`   | `string` or `date` | **Optional**                      | ISO-8601 timestamp of the last cache hit  | Only for **Measure From = Last Access** (idle TTL) or LRU cleanup |
 
-> **`last_access` is optional.** Leave the node's **Last Access Column** empty to skip it — the
-> node then writes one fewer column per hit and you can omit the column from the table. You only
-> need it if you set **Measure From = Last Access**, or want to prune by idle time. A minimal
-> table is just `cache_key` + `payload` + `last_modified`.
-
-> **`payload` must be `string`.** The node serialises it with `JSON.stringify` and reads it
-> back with `JSON.parse`; a `json` column would return a parsed object and break that
-> round-trip (you'd see hits come back as `{ "_raw": ... }`).
->
-> **The timestamp columns can be `string` or `date`.** The node writes
-> `new Date().toISOString()` and parses read-back values tolerantly — including the no-`Z`
-> form a `date` column yields on SQLite — always as **UTC**, so the TTL is correct either way.
-> `string` is the simplest default; `date` displays nicely in the UI and gives true
-> chronological filtering for [cleanup](#6-maintenance--evict-expired-rows). With `string`
-> columns, ISO-8601 text also sorts chronologically, so cleanup's `lt` filter works too.
+> - **`payload` must be `string`** — a `json` column breaks the `JSON.stringify` / `JSON.parse`
+>   round-trip (hits come back as `{ "_raw": ... }`).
+> - **Timestamps can be `string` or `date`** — the node writes ISO-8601 UTC and parses
+>   read-back values as UTC either way, so the TTL stays correct.
+> - **`last_access` is optional** — leave the node's **Last Access Column** empty to skip it (a
+>   minimal table is `cache_key` + `payload` + `last_modified`). You only need it for
+>   **Measure From = Last Access** or idle-time cleanup.
 
 ### Create it in the UI
 
-**Option A — from the example CSV (creates the columns for you).** When you create a data
-table from a CSV, n8n reads the **header row** and makes one column per header. Use the
-included [`examples/cache-table.csv`](../examples/cache-table.csv):
+**From the example CSV (easiest).** Importing a CSV makes one column per header — use
+[`examples/cache-table.csv`](../examples/cache-table.csv):
 
 ```csv
 cache_key,payload,last_modified,last_access
 example-key,"{""value"":""hello"",""count"":42}",2026-06-20T12:00:00.000Z,2026-06-20T12:00:00.000Z
 ```
 
-**Data tables → Create → Import from CSV** → pick the file. The four columns are created from
-the header row; after import, make sure **`payload` is `String`** (re-set it if n8n inferred
-`json`); the timestamp columns may stay `String` or `Date`. Then delete the seed `example-key`
-row if you don't want it.
+**Data tables → Create → Import from CSV** → pick the file. After import, ensure **`payload`**
+is **String** (re-set if n8n inferred `json`); timestamps may be String or Date. Delete the
+seed row if you don't want it.
 
-**Option B — by hand.** **Data tables → Create** → add `cache_key` and `payload` as **String**,
-and `last_modified` as **String** or **Date**. Add `last_access` (String/Date) too if you want
-idle-time TTL or LRU cleanup; otherwise leave it out and clear the node's Last Access Column.
+**By hand.** **Data tables → Create** → add the columns from the table above (omit
+`last_access` unless you need idle-time TTL or cleanup).
 
-Either way, copy the table id from the URL when you're done.
+Copy the table id from the URL when done.
 
 ---
 
