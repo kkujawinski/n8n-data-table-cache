@@ -21,26 +21,24 @@ columns** (n8n adds `id`, `createdAt`, `updatedAt` automatically):
 > timestamps as `new Date().toISOString()`, then reads them straight back. A `json` or `date`
 > column would change what the API returns and break the round-trip. Stick to `string`.
 
-### Option A — create it from a file (API)
+### Create it in the UI
 
-Use the included script ([`examples/create-data-table.sh`](../examples/create-data-table.sh)):
+**Option A — from the example CSV (creates the columns for you).** When you create a data
+table from a CSV, n8n reads the **header row** and makes one column per header. Use the
+included [`examples/cache-table.csv`](../examples/cache-table.csv):
 
-```bash
-export N8N_BASE_URL="http://localhost:5678/api/v1"   # must end in /api/v1
-export N8N_API_KEY="<your n8n API key>"
-./examples/create-data-table.sh cache
+```csv
+cache_key,payload,last_modified,last_access
+example-key,"{""value"":""hello"",""count"":42}",2026-06-20T12:00:00.000Z,2026-06-20T12:00:00.000Z
 ```
 
-It calls `POST /api/v1/data-tables` with the schema above and prints the new table's `id`.
+**Data tables → Create → Import from CSV** → pick the file. The four columns are created from
+the header row; after import, confirm each column type is **String** (re-set any that n8n
+inferred as something else), then delete the seed `example-key` row if you don't want it.
 
-### Option B — create it in the UI
+**Option B — by hand.** **Data tables → Create** → add the four columns above as **String**.
 
-**Data tables → Create** → add the four columns above as **String**. Then copy the table id
-from the URL.
-
-> n8n has no "import a table definition" button in the UI — table *schemas* are created in the
-> UI or via the API (Option A). The UI's CSV import only adds **rows** to a table that already
-> exists.
+Either way, copy the table id from the URL when you're done.
 
 ---
 

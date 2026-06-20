@@ -1,0 +1,2 @@
+cache_key,payload,last_modified,last_access
+example-key,"{""value"":""hello"",""count"":42}",2026-06-20T12:00:00.000Z,2026-06-20T12:00:00.000Z
