@@ -14,6 +14,23 @@ import { isExpiredByTtl, safeParse } from './helpers';
 import { dataTableRequest, unwrapRows } from './stores/client';
 import { makeStore } from './stores/makeStore';
 
+/** Load the selected table's column names as dropdown options (empty if no table yet). */
+async function fetchColumnOptions(ctx: ILoadOptionsFunctions): Promise<INodePropertyOptions[]> {
+	const tableId = ctx.getCurrentNodeParameter('dataTableId', { extractValue: true }) as string;
+	if (!tableId) return [];
+
+	// The columns endpoint returns a bare array, not the `{ data: [...] }` envelope.
+	const response = await dataTableRequest(ctx, { method: 'GET', path: `/${tableId}/columns` });
+	const columns = Array.isArray(response)
+		? (response as IDataObject[])
+		: ((response as IDataObject)?.data as IDataObject[]) ?? [];
+
+	return columns
+		.map((column) => String(column.name ?? ''))
+		.filter((name) => name)
+		.map((name) => ({ name, value: name }));
+}
+
 /**
  * Read-through / write-back cache with two inputs:
  *
@@ -133,12 +150,12 @@ export class DataTableCache implements INodeType {
 				name: 'accessCol',
 				type: 'options',
 				typeOptions: {
-					loadOptionsMethod: 'getColumns',
+					loadOptionsMethod: 'getColumnsOrNone',
 					loadOptionsDependsOn: ['dataTableId.value'],
 				},
 				default: 'last_access',
 				description:
-					'Optional. Column for the last-hit timestamp; leave empty to skip last-access tracking (one fewer write per hit). Required only when Measure From is Last Access. Choose from the list, or specify an ID using an <a href="https://docs.n8n.io/code/expressions/">expression</a>.',
+					'Optional. Column for the last-hit timestamp; pick "None" to skip last-access tracking (one fewer write per hit). Required only when Measure From is Last Access. Choose from the list, or specify an ID using an <a href="https://docs.n8n.io/code/expressions/">expression</a>.',
 			},
 			{
 				displayName: 'Max Age',
@@ -193,24 +210,12 @@ export class DataTableCache implements INodeType {
 		},
 		loadOptions: {
 			async getColumns(this: ILoadOptionsFunctions): Promise<INodePropertyOptions[]> {
-				const tableId = this.getCurrentNodeParameter('dataTableId', {
-					extractValue: true,
-				}) as string;
-				if (!tableId) return [];
-
-				// The columns endpoint returns a bare array, not the `{ data: [...] }` envelope.
-				const response = await dataTableRequest(this, {
-					method: 'GET',
-					path: `/${tableId}/columns`,
-				});
-				const columns = Array.isArray(response)
-					? (response as IDataObject[])
-					: ((response as IDataObject)?.data as IDataObject[]) ?? [];
-
-				return columns
-					.map((column) => String(column.name ?? ''))
-					.filter((name) => name)
-					.map((name) => ({ name, value: name }));
+				return fetchColumnOptions(this);
+			},
+			// Same list, prefixed with an explicit "None" so an optional column field can be
+			// cleared from the dropdown in list mode (no expression-mode workaround needed).
+			async getColumnsOrNone(this: ILoadOptionsFunctions): Promise<INodePropertyOptions[]> {
+				return [{ name: 'None', value: '' }, ...(await fetchColumnOptions(this))];
 			},
 		},
 	};
