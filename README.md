@@ -22,8 +22,10 @@ Two inputs (`Input`, `Update`), two outputs (`Cache Hit`, `Cache Miss`), wired a
 
 Wire it as a loop: **Cache Miss → your work → the Update input**; take **Cache Hit** onward.
 
-➡️ **[Usage guide](docs/USAGE.md)** — table setup, credential, an importable example workflow,
-TTL, and evicting expired rows.
+➡️ **[Setup](docs/SETUP.md)** — one-time install: community node, data table, API key, credential
+(with screenshots).
+➡️ **[Usage guide](docs/USAGE.md)** — per-workflow: importable example, node config, the cache
+loop, TTL, and evicting expired rows.
 
 ## Install
 
@@ -32,7 +34,7 @@ Community node (n8n **Settings → Community Nodes → Install**): `n8n-nodes-da
 ## Setup (quick)
 
 - **Data table** with columns `cache_key`, `payload`, `last_modified` (and optional
-  `last_access`) — see the [guide](docs/USAGE.md#1-create-the-data-table-recommended-setup).
+  `last_access`) — see [Setup](docs/SETUP.md#2-create-the-cache-data-table).
 - **Credential:** the built-in **n8n API** credential — an API key (with `dataTable*` scopes)
   and a Base URL ending in `/api/v1`.
 

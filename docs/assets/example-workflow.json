@@ -1,0 +1,142 @@
+{
+  "name": "Data Table Cache example",
+  "nodes": [
+    {
+      "parameters": {
+        "dataTableId": {
+          "__rl": true,
+          "value": "REPLACE_WITH_TABLE_ID",
+          "mode": "id"
+        },
+        "cacheKey": "={{ $json.query.key }}",
+        "ttl": 10
+      },
+      "type": "n8n-nodes-datatable-cache.dataTableCache",
+      "typeVersion": 1,
+      "position": [
+        128,
+        -272
+      ],
+      "id": "42bd01db-b713-4ac5-8a7e-dfc640597ac8",
+      "name": "Data Table Cache",
+      "credentials": {
+        "n8nApi": {
+          "id": "REPLACE_WITH_CREDENTIAL_ID",
+          "name": "n8n API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "path": "data-table-cache-example",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -96,
+        -272
+      ],
+      "id": "1f5204f1-6587-4c24-b89e-15ea23f52144",
+      "name": "Webhook",
+      "webhookId": "00000000-0000-0000-0000-000000000000"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        352,
+        -416
+      ],
+      "id": "066a54b0-2c1f-482e-ade6-77562be65dba",
+      "name": "Respond to Webhook"
+    },
+    {
+      "parameters": {
+        "jsCode": "return {\n  \"cached\": DateTime.now(),\n  \"value\": \"ABC\"\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        352,
+        -224
+      ],
+      "id": "40599d17-f6b5-4ee8-833b-266cbc01043b",
+      "name": "Heavy processing"
+    }
+  ],
+  "pinData": {
+    "Webhook": [
+      {
+        "json": {
+          "headers": {
+            "host": "n8n.example.com",
+            "user-agent": "curl/8.0.0",
+            "accept": "*/*"
+          },
+          "params": {},
+          "query": {
+            "key": "demo-key"
+          },
+          "body": {},
+          "webhookUrl": "https://n8n.example.com/webhook/data-table-cache-example",
+          "executionMode": "production"
+        }
+      }
+    ]
+  },
+  "connections": {
+    "Data Table Cache": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Heavy processing",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Data Table Cache",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Heavy processing": {
+      "main": [
+        [
+          {
+            "node": "Data Table Cache",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "meta": {
+    "note": "Replace REPLACE_WITH_TABLE_ID with your data table ID and select your n8n API credential on the Data Table Cache node. Cache Miss (output 2) loops through 'Heavy processing' back into the node's Update input (index 1); Cache Hit (output 1) carries the cached or freshly-stored payload."
+  },
+  "tags": []
+}
