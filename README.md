@@ -1,7 +1,13 @@
 # n8n-nodes-datatable-cache
 
+[![npm version](https://img.shields.io/npm/v/n8n-nodes-datatable-cache.svg)](https://www.npmjs.com/package/n8n-nodes-datatable-cache)
+[![npm downloads](https://img.shields.io/npm/dm/n8n-nodes-datatable-cache.svg)](https://www.npmjs.com/package/n8n-nodes-datatable-cache)
+[![license](https://img.shields.io/npm/l/n8n-nodes-datatable-cache.svg)](LICENSE)
+
 A **Data Table Cache** node for n8n: a read-through / write-back cache backed by an n8n
 [data table](https://docs.n8n.io/data/data-tables/), with hit/miss routing and TTL expiry.
+
+📦 **[npm: n8n-nodes-datatable-cache](https://www.npmjs.com/package/n8n-nodes-datatable-cache)**
 
 > **Requirements:** an n8n version whose public API serves `/api/v1/data-tables` (older
 > instances return 404), and `executionOrder: v1` (the default on recent n8n).
@@ -29,7 +35,8 @@ loop, TTL, and evicting expired rows.
 
 ## Install
 
-Community node (n8n **Settings → Community Nodes → Install**): `n8n-nodes-datatable-cache`.
+Community node (n8n **Settings → Community Nodes → Install**):
+[`n8n-nodes-datatable-cache`](https://www.npmjs.com/package/n8n-nodes-datatable-cache).
 
 ## Setup (quick)
 
