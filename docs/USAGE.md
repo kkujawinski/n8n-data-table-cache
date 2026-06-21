@@ -96,6 +96,12 @@ Build Request ─▶ [Input] Data Table Cache [Cache Hit] ─▶ Use Result
 Derive **Cache Key** from a field present on both the lookup item and the processed item (e.g.
 `={{ $json.id }}`). Requires `executionOrder: v1` (default on recent n8n).
 
+> **One item = one JSON object, not an array.** n8n passes items individually, so the **Update**
+> input stores a single item's `$json` per cache key, and **Cache Hit** emits that same single
+> JSON object. The cached payload is whatever one item holds — it is **not** the whole list of
+> items flowing through the node. To cache a collection under one key, wrap it in an object
+> first (e.g. `{ "items": [...] }`) so it travels as a single item.
+
 ---
 
 ## 5. TTL & expiry guidance
